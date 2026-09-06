@@ -1,12 +1,20 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
+const qrcode = require('qrcode');
 const express = require('express');
-const QRCode = require('qrcode');
-const pino = require('pino');
 
 const app = express();
-let qrCodeData = null;
-let isConnected = false;
+const PORT = process.env.PORT || 10000;
+let qrCodeData = '';
+
+app.get('/', (req, res) => {
+  if (qrCodeData) {
+    res.send(`<h2>امسح رمز QR</h2><img src="${qrCodeData}" />`);
+  } else {
+    res.send('<h2>البوت متصل ✅</h2>');
+  }
+});
+app.listen(PORT, () => console.log('Server running on port ' + PORT));
 
 async function askGroq(text) {
   try {
@@ -17,9 +25,9 @@ async function askGroq(text) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'llama-3.1-8b-instant',
         messages: [
-          { role: 'system', content: 'أنت بوت واتساب ذكي اسمك سيل، رد بالعربية باختصار وود.' },
+          { role: 'system', content: 'انت بوت واتساب ذكي، رد بالعربية باختصار وود.' },
           { role: 'user', content: text }
         ],
         temperature: 0.7,
@@ -27,64 +35,56 @@ async function askGroq(text) {
       })
     });
     const data = await res.json();
-    return data.choices?.[0]?.message?.content || 'ما قدرت أرد الحين.';
+    if (data.error) {
+      console.log('Groq Error:', data.error);
+      return 'صار خطأ من Groq: ' + data.error.message;
+    }
+    return data.choices?.[0]?.message?.content || 'ما قدرت ارد الحين';
   } catch (e) {
-    console.error(e);
-    return 'صار خطأ في الاتصال بـ Groq.';
+    console.log('خطأ في الاتصال بـ Groq:', e);
+    return 'ما قدرت ارد الحين، حاول بعد شوي';
   }
 }
 
-async function startBot() {
+async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: true });
+  const sock = makeWASocket({ auth: state, printQRInTerminal: true });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
-      qrCodeData = await QRCode.toDataURL(qr);
-      isConnected = false;
-      console.log('QR جديد جاهز');
-    }
-    if (connection === 'open') {
-      qrCodeData = null; isConnected = true;
-      console.log('تم الاتصال بواتساب بنجاح');
+      qrCodeData = await qrcode.toDataURL(qr);
+      console.log('QR جديد');
     }
     if (connection === 'close') {
-      isConnected = false;
-      const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (shouldReconnect) startBot();
+      const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode!== DisconnectReason.loggedOut;
+      console.log('سبب قطع الاتصال', lastDisconnect?.error);
+      if (shouldReconnect) start();
+    } else if (connection === 'open') {
+      console.log('تم الاتصال بواتساب بنجاح');
+      qrCodeData = '';
     }
   });
 
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages[0];
+  sock.ev.on('messages.upsert', async (m) => {
+    const msg = m.messages[0];
     if (!msg.message || msg.key.fromMe) return;
     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
     if (!text) return;
     const from = msg.key.remoteJid;
 
-    if (text.trim() === '!ping') {
-      await sock.sendMessage(from, { text: 'pong! البوت شغال تمام' });
+    if (text === '!ping') {
+      await sock.sendMessage(from, { text: 'pong! البوت شغال تمام ✅' });
       return;
     }
 
-    // أي رسالة ثانية -> Groq يرد
-    if (text.startsWith('!')) return; // تجاهل أوامر غير معروفة
-    await sock.sendPresenceUpdate('composing', from);
+    // اي رسالة ثانية -> Groq
+    await sock.sendMessage(from, { text: 'لحظة...' });
     const reply = await askGroq(text);
-    await sock.sendMessage(from, { text: reply }, { quoted: msg });
+    await sock.sendMessage(from, { text: reply });
   });
 }
 
-app.get('/', (req, res) => {
-  if (isConnected) return res.send('<h1 style="text-align:center;font-family:sans-serif">✅ البوت متصل</h1>');
-  if (qrCodeData) return res.send(`<div style="text-align:center;font-family:sans-serif"><h2>امسح QR للربط</h2><img src="${qrCodeData}" style="width:300px"><script>setTimeout(()=>location.reload(),20000)</script></div>`);
-  res.send('<h2 style="text-align:center">جاري التشغيل...</h2><script>setTimeout(()=>location.reload(),3000)</script>');
-});
-
-app.listen(process.env.PORT || 3000, () => {
-  console.log('السيرفر شغال');
-  startBot();
-});
+start();
