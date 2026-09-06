@@ -1,20 +1,18 @@
 {
-  "name": "seel-whatsapp-bot",
+  "name": "ciel-whatsapp-bot",
   "version": "1.0.0",
+  "description": "Ciel Bot with Gemini AI",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": "20.x"
-  },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
-    "@hapi/boom": "^10.0.0",
-    "express": "^4.18.2",
-    "@google/genai": "latest",
-    "pino": "latest",
+    "@google/generative-ai": "^0.21.0",
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.13",
+    "express": "^4.19.2",
     "qrcode": "^1.5.3",
     "qrcode-terminal": "^0.12.0"
   }
 }
+
