@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
+  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
 const { Boom } = require('@hapi/boom')
 const express = require('express')
 const qrcode = require('qrcode')
@@ -71,7 +71,7 @@ async function askGemini(messages){
   }))
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-1.5-flash',
     contents: formattedContents,
     config: {
       systemInstruction: sysInstruction,
@@ -121,10 +121,8 @@ async function startBot(){
     const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || []
     const isBotMentioned = mentioned.some(j => j.replace(/[^0-9]/g,'').includes(botNum)) || text.includes('سيل') || text.includes('Ciel')
 
-    // التحقق من صلاحيات الأدمن للأوامر الإدارية
     const userIsAdmin = await isAdmin(sock, from, sender)
 
-    // 1. الأوامر الإدارية (تتطلب أدمن أو اللورد)
     if(userIsAdmin){
       if(text.includes('القائمة 001')){
         let report = `📋 *قائمة اللورد والمدراء السرية (001):*\n\n`
@@ -137,7 +135,6 @@ async function startBot(){
         return
       }
 
-      // أمر الطرد الفعلي (ينفذ طرد حقيقي في الواتساب)
       if(text.startsWith('طرد') || text.includes('kick')){
         if(!from.includes('@g.us')) return
         let target = mentioned[0]
@@ -158,7 +155,6 @@ async function startBot(){
         return
       }
 
-      // أمر الكتم
       if(text.startsWith('كتم ')){
         let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('كتم','').trim().replace(/[^0-9]/g,'')
         if(targetNum){
@@ -169,7 +165,6 @@ async function startBot(){
         return
       }
 
-      // أمر فك الكتم
       if(text.startsWith('فك كتم ')){
         let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('فك كتم','').trim().replace(/[^0-9]/g,'')
         if(targetNum){
@@ -180,7 +175,6 @@ async function startBot(){
         return
       }
 
-      // أمر إضافة النقاط مع حفظ السبب في السجل (Logs)
       if(text.startsWith('إضافة ')){
         let parts = text.split(' ').filter(Boolean)
         let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
@@ -209,7 +203,6 @@ async function startBot(){
         return
       }
 
-      // أمر خصم النقاط مع حفظ السبب في السجل (Logs)
       if(text.startsWith('خصم ')){
         let parts = text.split(' ').filter(Boolean)
         let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
@@ -238,14 +231,12 @@ async function startBot(){
         return
       }
     } else {
-      // تنبيه إذا حاول عضو عادي تنفيذ أوامر الأدمن
       if(text.startsWith('طرد') || text.startsWith('كتم ') || text.startsWith('إضافة ') || text.startsWith('خصم ')){
         await sock.sendMessage(from, {text: `🚫 عذراً، هذا الأمر مخصص للمشرفين (الأدمن) فقط!\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
         return
       }
     }
 
-    // 2. تقارير المشرفين العامة (عرض فقط)
     if(text === 'سيل التقارير 007' || text === 'سييل التقارير 007'){
       let report = `📊 *تقرير المشرفين العام (007 - عرض فقط):*\n\n`
       for(let [num, pts] of Object.entries(pointsDB)){
@@ -257,7 +248,6 @@ async function startBot(){
       return
     }
 
-    // 3. نظام الملف الشخصي (استبيان تفصيلي شامل)
     if(text === 'ملفي'){
       let currentNick = nickDB[senderNum] || 'غير محدد'
       let currentPoints = pointsDB[senderNum] || 0
@@ -323,3 +313,4 @@ async function startBot(){
   })
 }
 startBot()
+
