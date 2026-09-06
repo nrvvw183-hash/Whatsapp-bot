@@ -17,6 +17,12 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => console.log('Server running on port ' + PORT));
 
 async function askGroq(text) {
+  // ميزة: لو سأل عن الصانع
+  const lower = text.toLowerCase();
+  if (lower.includes('مين صنعك') || lower.includes('من صنعك') || lower.includes('مين سواك') || lower.includes('من سواك') || lower.includes('who made you') || lower.includes('مين عملك')) {
+    return 'ريمورو أوريليوس 👑';
+  }
+
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -25,9 +31,9 @@ async function askGroq(text) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
+        model: 'openai/gpt-oss-20b',
         messages: [
-          { role: 'system', content: 'انت بوت واتساب ذكي، رد بالعربية باختصار وود.' },
+          { role: 'system', content: 'انت بوت واتساب ذكي وود. تكلم دائما بالعربية العامية البسيطة (لهجة خليجية خفيفة مفهومة للكل). ردودك قصيرة وطبيعية كأنك صديق يسالف، بدون فصحى ثقيلة. اسم صانعك هو ريمورو أوريليوس، لو سألوك عنه اذكره بفخر.' },
           { role: 'user', content: text }
         ],
         temperature: 0.7,
@@ -60,7 +66,7 @@ async function start() {
     }
     if (connection === 'close') {
       const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode!== DisconnectReason.loggedOut;
-      console.log('سبب قطع الاتصال', lastDisconnect?.error);
+      console.log('انقطع الاتصال', lastDisconnect?.error);
       if (shouldReconnect) start();
     } else if (connection === 'open') {
       console.log('تم الاتصال بواتساب بنجاح');
@@ -80,8 +86,6 @@ async function start() {
       return;
     }
 
-    // اي رسالة ثانية -> Groq
-    await sock.sendMessage(from, { text: 'لحظة...' });
     const reply = await askGroq(text);
     await sock.sendMessage(from, { text: reply });
   });
