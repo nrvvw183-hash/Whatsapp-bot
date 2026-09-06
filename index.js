@@ -1,3 +1,4 @@
+require('http').createServer((req,res)=>res.end('bot running')).listen(process.env.PORT||3000);
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const qrcode = require('qrcode-terminal');
