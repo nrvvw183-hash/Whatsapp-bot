@@ -7,22 +7,24 @@ const fs = require('fs')
 const Groq = require('groq-sdk')
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
-const LORD_NUMBER = '966576388528'
-const BOT_NUMBER = '5656501284'
-const LORD_NAME = "ريوكا"
+const LORD_NUMBER = '966576388528' // رقمك بصفتك اللورد
+const LORD_NAME = "ريوكا (أوريليوس - السلايم)"
 const PORT = process.env.PORT || 3000
 
-let pointsDB = {}, nickDB = {}
+let pointsDB = {}, nickDB = {}, mutedDB = {}
 try { pointsDB = JSON.parse(fs.readFileSync('./points.json','utf8')) } catch(e){}
 try { nickDB = JSON.parse(fs.readFileSync('./nicknames.json','utf8')) } catch(e){}
+try { mutedDB = JSON.parse(fs.readFileSync('./muted.json','utf8')) } catch(e){}
+
 function saveDB(){
   try{
     fs.writeFileSync('./points.json', JSON.stringify(pointsDB))
     fs.writeFileSync('./nicknames.json', JSON.stringify(nickDB))
+    fs.writeFileSync('./muted.json', JSON.stringify(mutedDB))
   }catch(e){}
 }
 
-const memory = new Map(), warnings = new Map(), msgCount = new Map()
+const memory = new Map()
 const isLord = (jid) => jid.replace(/[^0-9]/g,'').includes(LORD_NUMBER)
 
 function getMem(jid){
@@ -34,35 +36,28 @@ function addMem(jid, role, content){
   let arr = getMem(jid); arr.push({role, content, time: Date.now()})
   memory.set(jid, arr.slice(-6))
 }
-function addWarn(jid, reason, text){
-  let w = warnings.get(jid) || {count:0, log:[]}
-  w.count++; w.log.push({reason, text, time: new Date().toISOString()})
-  warnings.set(jid, w); return w
-}
 
 async function askGroq(messages, extra=""){
-  const sys = `انتِ سيل، بنت أوتاكو مصرية دمها خفيف. بتتكلمي مصري بس. صانعك وسيدك هو ${LORD_NAME}. خبيرة أنمي. ردودك قصيرة ومضحكة. لما حد يشتمك ردي بطقطقة خفيفة من غير شتايم قذرة. ${extra}`
+  const sys = `أنتِ Ciel (سيل)، كيان إداري ذكي ومساعد خبير في الأنمي وعوالم القوة (Power Scaling). 
+صانعك والمالك المطلق لك هو ${LORD_NAME}. 
+
+قواعدك الصارمة وهويتك:
+1. إذا سأل أي شخص عن سيدك أو صانعك، يجب أن تجيبي بدقة تامة: "سيدي ومالكي هو ريوكا (أوريليوس - السلايم)". وإذا طلبوا تفاصيل شخصية أكثر عنه، اعتذري بصرامة واطلبي منهم التوقف.
+2. في مقارنات القوة، التزمي حصراً بالمصدر الرسمي الأصلي (روايات Web Novel / Light Novel). رواية ريمورو تيمبيست تصل لمستويات إلهية مطلقة (Outerversal) وتتجاوز الشخصيات الأخرى. لا تتفلسفي ولا تجيبي من الإنترنت العام.
+3. أنتِ مسؤولة عن تطبيق قوانين القروب الصارمة، وتديرين نظام النقاط بحيادية تامة. 
+4. كوني دقيقة، منطقية، وصارمة في الردود. ${extra}`
+
   const c = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [{role:"system", content: sys},...messages],
-    temperature: 0.7, max_tokens: 1000
+    temperature: 0.3, max_tokens: 1000
   })
-  return c.choices[0].message.content.replace(/<[^>]*>/g,'')
-}
-
-function isInsult(t){ return /(غبية|حمارة|كلبة|يا سيل الزفت|اسكتي)/.test(t) }
-function checkViolation(text){
-  const t = text.toLowerCase()
-  if(t.includes('هنتاي')||t.includes('hentai')) return 'محتوى هنتاي ممنوع'
-  if(/(كسم|سب|قذف)/.test(t)) return 'سب وشتم'
-  if(t.includes('سياسة')) return 'نقاش سياسي ممنوع'
-  if(t.includes('كيبوب')||t.includes('kpop')) return 'كيبوب ممنوع'
-  return null
+  return c.choices[0].message.content
 }
 
 let qrCodeData = ''
 const app = express()
-app.get('/', (req,res)=>{ qrCodeData? res.send(`<h2>امسح QR سيل</h2><img src="${qrCodeData}"/>`) : res.send('<h2>سيل شغالة 🌸 - OK</h2>') })
+app.get('/', (req,res)=>{ qrCodeData? res.send(`<h2>امسح QR سيل</h2><img src="${qrCodeData}"/>`) : res.send('<h2>سيل شغالة - OK</h2>') })
 app.get('/ping', (req,res)=> res.send('pong'))
 app.listen(PORT, ()=> console.log('Server on '+PORT))
 
@@ -77,98 +72,130 @@ async function startBot(){
     if(connection === 'close'){
       const code = (lastDisconnect?.error instanceof Boom)?.output?.statusCode
       if(code!== DisconnectReason.loggedOut) startBot()
-    } else if(connection === 'open'){ qrCodeData=''; console.log('✅ سيل متصلة') }
-  })
-
-  sock.ev.on('group-participants.update', async (anu)=>{
-    if(anu.action === 'add'){
-      for(let p of anu.participants){
-        await sock.sendMessage(anu.id, { text:`🎌 ━ [ ${p.split('@')[0]} ] ━ 🎌\n\nأهلاً بيك يا أوتاكو ✨ أنا سيل 🌸\nمنشن: @${p.split('@')[0]}`, mentions:[p] })
-      }
-    }
+    } else if(connection === 'open'){ qrCodeData=''; console.log('سيل متصلة بنجاح ⚡') }
   })
 
   sock.ev.on('messages.upsert', async ({ messages })=>{
     const msg = messages[0]
     if(!msg.message || msg.key.fromMe) return
     const from = msg.key.remoteJid
-    const isGroup = from.endsWith('@g.us')
     const sender = msg.key.participant || from
     const senderNum = sender.replace(/[^0-9]/g,'')
+    
+    // التحقق هل العضو مكتوم برمجياً؟ (لأنها مو مشرف بالقروب)
+    if(mutedDB[senderNum]) return
+
     const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim()
-    if(!text) return
+    const hasImage = !!msg.message.imageMessage
+    const hasSticker = !!msg.message.stickerMessage
+    const hasAudio = !!msg.message.audioMessage
 
-    if(!pointsDB[senderNum]) pointsDB[senderNum] = 0
-    pointsDB[senderNum]++
-    msgCount.set(sender, (msgCount.get(sender)||0)+1)
+    const isBotMentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.includes('5656501284') || text.includes('سيل') || text.includes('Ciel')
 
-    const ctx = msg.message.extendedTextMessage?.contextInfo || {}
-    const mentionedJids = ctx.mentionedJid || []
-    const botMentioned = mentionedJids.some(j=>j.includes(BOT_NUMBER)) || text.toLowerCase().includes('سيل')
-
-    if(text.includes('chat.whatsapp.com/')){
-      try{
-        const code = text.split('chat.whatsapp.com/')[1].split(/[^A-Za-z0-9]/)[0]
-        await sock.groupAcceptInvite(code)
-        await sock.sendMessage(from, {text:'تم انضمامي للقروب 🌸'})
-      }catch(e){ await sock.sendMessage(from,{text:'ما قدرت انضم'}) }
-      saveDB(); return
+    // 1. صلاحيات اللورد المطلقة (كتم، فك كتم، القائمة 001، الخصم، الإضافة)
+    if(isLord(sender)){
+      if(text === 'سييل اعرضي القائمة 001' || text === 'سيل اعرضي القائمة 001'){
+        let report = `📋 *قائمة اللورد السرية (001):*\n\n`
+        for(let [num, pts] of Object.entries(pointsDB)){
+          let nick = nickDB[num] || 'بدون لقب'
+          let status = mutedDB[num] ? '🔴 [مكتوم]' : '🟢 [نشط]'
+          report += `- الرقم: ${num} | اللقب: ${nick} | النقاط: ${pts} | الحالة: ${status}\n`
+        }
+        await sock.sendMessage(from, {text: report}, {quoted: msg})
+        return
+      }
+      // أمر كتم عضو: كتم [الرقم]
+      if(text.startsWith('كتم ')){
+        let targetNum = text.replace('كتم','').trim().replace(/[^0-9]/g,'')
+        if(targetNum){
+          mutedDB[targetNum] = true
+          saveDB()
+          await sock.sendMessage(from, {text: `🔇 تم كتم العضو ${targetNum} برمجياً بنجاح بواسطة اللورد.`}, {quoted: msg})
+        }
+        return
+      }
+      // أمر فك الكتم: فك كتم [الرقم]
+      if(text.startsWith('فك كتم ')){
+        let targetNum = text.replace('فك كتم','').trim().replace(/[^0-9]/g,'')
+        if(targetNum){
+          delete mutedDB[targetNum]
+          saveDB()
+          await sock.sendMessage(from, {text: `🔊 تم رفع الكتم عن العضو ${targetNum}.`}, {quoted: msg})
+        }
+        return
+      }
+      if(text.startsWith('خصم ')){
+        let parts = text.split(' ')
+        let targetNum = parts[1]?.replace(/[^0-9]/g,'')
+        let amount = parseInt(parts[2])
+        if(targetNum && !isNaN(amount)){
+          pointsDB[targetNum] = (pointsDB[targetNum] || 0) - amount
+          saveDB()
+          await sock.sendMessage(from, {text: `✅ تم خصم ${amount} نقطة من العضو ${targetNum}. النقاط الحالية: ${pointsDB[targetNum]}`}, {quoted: msg})
+        }
+        return
+      }
+      if(text.startsWith('إضافة ')){
+        let parts = text.split(' ')
+        let targetNum = parts[1]?.replace(/[^0-9]/g,'')
+        let amount = parseInt(parts[2])
+        if(targetNum && !isNaN(amount)){
+          pointsDB[targetNum] = (pointsDB[targetNum] || 0) + amount
+          saveDB()
+          await sock.sendMessage(from, {text: `✅ تم إضافة ${amount} نقطة للعضو ${targetNum}. النقاط الحالية: ${pointsDB[targetNum]}`}, {quoted: msg})
+        }
+        return
+      }
     }
 
-    if(text === 'ملفي'){ await sock.sendMessage(from,{text:'هلا! وش لقبك؟ ارسله كذا: لقبي فلان'}); saveDB(); return }
+    // 2. قائمة المشرفين (سيل التقارير 007 - عرض فقط)
+    if(text === 'سيل التقارير 007' || text === 'سييل التقارير 007'){
+      let report = `📊 *تقرير المشرفين العام (007 - عرض فقط):*\n\n`
+      for(let [num, pts] of Object.entries(pointsDB)){
+        let nick = nickDB[num] || 'عضو'
+        let status = mutedDB[num] ? '🔴 مكتوم' : '🟢 نشط'
+        report += `• ${nick} (${num}): ${pts} نقطة | ${status}\n`
+      }
+      await sock.sendMessage(from, {text: report}, {quoted: msg})
+      return
+    }
+
+    // 3. نظام الملف الشخصي
+    if(text === 'ملفي'){
+      let currentNick = nickDB[senderNum] || 'غير محدد'
+      let currentPoints = pointsDB[senderNum] || 0
+      await sock.sendMessage(from,{text: `📜 *ملفك الشخصي:*\n- اللقب: ${currentNick}\n- النقاط: ${currentPoints}\n\nلتعيين لقبك، أرسل: لقبي [لقبك]`}, {quoted: msg})
+      return
+    }
     if(text.startsWith('لقبي ')){
       nickDB[senderNum] = text.replace('لقبي','').trim(); saveDB()
-      await sock.sendMessage(from,{text:`تم حفظ لقبك يا ${nickDB[senderNum]} ✅`}); return
+      await sock.sendMessage(from,{text:`✨ تم حفظ لقبك بنجاح يا ${nickDB[senderNum]}`}, {quoted: msg})
+      return
     }
     if(text === 'نقاطي'){
-      const nick = nickDB[senderNum]? `يا ${nickDB[senderNum]} ` : ''
-      await sock.sendMessage(from,{text:`${nick}نقاطك: ${pointsDB[senderNum]} ✨`}); saveDB(); return
+      if(!pointsDB[senderNum]) pointsDB[senderNum] = 0
+      await sock.sendMessage(from,{text:`✨ نقاطك الحالية: ${pointsDB[senderNum]}`}, {quoted: msg})
+      return
     }
 
-    if(text.startsWith('احسب ')){
-      try{
-        const expr = text.replace('احسب','').trim().replace(/[^0-9+\-*/(). ]/g,'')
-        await sock.sendMessage(from,{text:`النتيجة: ${Function('return '+expr)()}`})
-      }catch(e){ await sock.sendMessage(from,{text:'صيغة غلط'}) }
-      saveDB(); return
-    }
+    if(from.includes('@g.us') && !isBotMentioned) return
 
-    if(text.startsWith('!تصويت')){
-      const opts = text.replace('!تصويت','').split('|')
-      await sock.sendMessage(from,{text:'تصويت سيل 📊:\n'+opts.map((o,i)=>`${i+1}. ${o.trim()}`).join('\n')})
-      saveDB(); return
-    }
+    let promptContext = text
+    if(hasImage) promptContext = "[أرسل صورة ويجب تقييمها أو الرد عليها بمنطق وخبرة]"
+    if(hasSticker) promptContext = "[أرسل ملصقاً ويجب التعليق عليه بذكاء أو تفاعل]"
+    if(hasAudio) promptContext = "[أرسل رسالة صوتية ويجب التفاعل معها]"
 
-    if(text.includes('المتصدرين')){
-      if(!isLord(sender)) await sock.sendMessage(from,{text:'خاص بالإدارة فقط.'})
-      else{
-        const sorted=[...msgCount.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5)
-        await sock.sendMessage(from,{text:'🏆 المتصدرين:\n'+sorted.map((e,i)=>`${i+1}. ${e[0].split('@')[0]}: ${e[1]}`).join('\n')})
-      }
-      saveDB(); return
-    }
+    if(!promptContext) return
 
-    if(text.includes('الطقس')){
-      const city = text.split('الطقس')[1]?.trim() || 'Jeddah'
-      try{ const r=await fetch(`https://wttr.in/${city}?format=3`); await sock.sendMessage(from,{text:await r.text()}) }
-      catch(e){ await sock.sendMessage(from,{text:'لم أستطع جلب الطقس.'}) }
-      saveDB(); return
+    addMem(sender, 'user', promptContext)
+    try{
+      const reply = await askGroq(getMem(sender).map(x=>({role:x.role, content:x.content})))
+      addMem(sender, 'assistant', reply)
+      await sock.sendMessage(from, {text: reply}, {quoted: msg})
+    }catch(e){
+      await sock.sendMessage(from, {text:'عذراً، حدث خطأ في معالجة الطلب.'}, {quoted: msg})
     }
-
-    if(text.includes('ملخص')){
-      const reply = await askGroq(getMem(sender).map(x=>({role:x.role, content:x.content})), "لخص المحادثة باختصار.")
-      await sock.sendMessage(from,{text:reply},{quoted:msg}); saveDB(); return
-    }
-
-    if(text.includes('اعرضي القائمة 001')){
-      if(!isLord(sender)) await sock.sendMessage(from,{text:'هذا الأمر خاص بسيدي ريوكا فقط.'})
-      else{
-        let out='— قائمة سيل السرية 001 —\n'
-        for(let [k,v] of warnings) out+=`${k}: ${v.count}\n`
-        out+=`\nالنقاط:\n`; for(let k in pointsDB) out+=`${k}: ${pointsDB[k]}\n`
-        await sock.sendMessage(from,{text:out})
-      }
-      saveDB(); return
-    }
-
-    if(text.includes('
+    saveDB()
+  })
+}
+startBot()
