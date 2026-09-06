@@ -48,7 +48,7 @@ async function askGroq(messages, extra=""){
 4. كوني دقيقة، منطقية، وصارمة في الردود. ${extra}`
 
   const c = await groq.chat.completions.create({
-    model: "llama-3.1-8b-instant", // تم التعديل إلى مودل 8b السريع والمستقر
+    model: "openai/gpt-oss-120b", // تم التعديل إلى النموذج المطلوب
     messages: [{role:"system", content: sys},...messages],
     temperature: 0.3, max_tokens: 1000
   })
