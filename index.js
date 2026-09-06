@@ -48,7 +48,7 @@ async function askGroq(messages, extra=""){
 4. كوني دقيقة، منطقية، وصارمة في الردود. ${extra}`
 
   const c = await groq.chat.completions.create({
-    model: "openai/gpt-oss-20b", // التجربة بالنموذج المطلوب
+    model: "openai/gpt-oss-20b", // النموذج المطلوب للاختبار
     messages: [{role:"system", content: sys},...messages],
     temperature: 0.3, max_tokens: 1000
   })
@@ -90,7 +90,11 @@ async function startBot(){
     const hasSticker = !!msg.message.stickerMessage
     const hasAudio = !!msg.message.audioMessage
 
-    const isBotMentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.includes('5656501284') || text.includes('سيل') || text.includes('Ciel')
+    // استخراج معلومات البوت والمنشنات بدقة
+    const botJid = sock.user?.id || ''
+    const botNum = botJid.replace(/[^0-9]/g,'')
+    const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || []
+    const isBotMentioned = mentioned.some(j => j.replace(/[^0-9]/g,'').includes(botNum)) || text.includes('سيل') || text.includes('Ciel')
 
     // 1. صلاحيات اللورد المطلقة
     if(isLord(sender)){
@@ -104,8 +108,23 @@ async function startBot(){
         await sock.sendMessage(from, {text: report}, {quoted: msg})
         return
       }
+
+      // أمر الطرد مع دعم المنشن
+      if(text.startsWith('طرد')){
+        if(!from.includes('@g.us')) return
+        const target = mentioned[0]
+        if(target){
+          await sock.groupParticipantsUpdate(from, [target], "remove")
+          await sock.sendMessage(from, {text: `✅ تم طرد العضو: ${target.replace(/[^0-9]/g,'')}`}, {quoted: msg})
+        } else {
+          await sock.sendMessage(from, {text: '⚠️ منشن الشخص المطلوب: طرد @فلان'}, {quoted: msg})
+        }
+        return
+      }
+
+      // أمر الكتم (يدعم المنشن أو الكتابة اليدوية)
       if(text.startsWith('كتم ')){
-        let targetNum = text.replace('كتم','').trim().replace(/[^0-9]/g,'')
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('كتم','').trim().replace(/[^0-9]/g,'')
         if(targetNum){
           mutedDB[targetNum] = true
           saveDB()
@@ -113,8 +132,10 @@ async function startBot(){
         }
         return
       }
+
+      // أمر فك الكتم
       if(text.startsWith('فك كتم ')){
-        let targetNum = text.replace('فك كتم','').trim().replace(/[^0-9]/g,'')
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('فك كتم','').trim().replace(/[^0-9]/g,'')
         if(targetNum){
           delete mutedDB[targetNum]
           saveDB()
@@ -122,10 +143,12 @@ async function startBot(){
         }
         return
       }
+
+      // أمر الخصم (يدعم المنشن أو الرقم مع القيمة)
       if(text.startsWith('خصم ')){
         let parts = text.split(' ')
-        let targetNum = parts[1]?.replace(/[^0-9]/g,'')
-        let amount = parseInt(parts[2])
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || parts[1]?.replace(/[^0-9]/g,'')
+        let amount = parseInt(mentioned[0] ? parts[2] : parts[2])
         if(targetNum && !isNaN(amount)){
           pointsDB[targetNum] = (pointsDB[targetNum] || 0) - amount
           saveDB()
@@ -133,10 +156,12 @@ async function startBot(){
         }
         return
       }
+
+      // أمر الإضافة (يدعم المنشن أو الرقم مع القيمة)
       if(text.startsWith('إضافة ')){
         let parts = text.split(' ')
-        let targetNum = parts[1]?.replace(/[^0-9]/g,'')
-        let amount = parseInt(parts[2])
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || parts[1]?.replace(/[^0-9]/g,'')
+        let amount = parseInt(mentioned[0] ? parts[2] : parts[2])
         if(targetNum && !isNaN(amount)){
           pointsDB[targetNum] = (pointsDB[targetNum] || 0) + amount
           saveDB()
@@ -158,7 +183,7 @@ async function startBot(){
       return
     }
 
-    // 3. نظام الملف الشخصي (تم إبقاؤها مستقلة وسريعة لكي لا تتأثر بالذكاء الاصطناعي)
+    // 3. نظام الملف الشخصي والنقاط (مستقلة وسريعة لا تتدخل فيها الذكاء الاصطناعي)
     if(text === 'ملفي'){
       let currentNick = nickDB[senderNum] || 'غير محدد'
       let currentPoints = pointsDB[senderNum] || 0
@@ -198,3 +223,4 @@ async function startBot(){
   })
 }
 startBot()
+
