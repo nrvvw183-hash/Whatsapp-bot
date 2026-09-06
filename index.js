@@ -12,7 +12,7 @@ async function start() {
     if(qr) qrcode.generate(qr, {small:true});
     if(connection === 'close'){
       const code = (lastDisconnect?.error instanceof Boom)?.output?.statusCode;
-      if(code!== DisconnectReason.loggedOut) start();
+      if(code === DisconnectReason.loggedOut) start();
     } else if(connection === 'open') console.log('Bot connected!');
   });
   sock.ev.on('messages.upsert', async ({messages}) => {
