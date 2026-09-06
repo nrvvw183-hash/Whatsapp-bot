@@ -48,7 +48,7 @@ async function askGroq(messages, extra=""){
 4. كوني دقيقة، منطقية، وصارمة في الردود. ${extra}`
 
   const c = await groq.chat.completions.create({
-    model: "llama-3.3-70b-versatile",
+    model: "llama-3.1-70b-versatile", // النسخة الأكثر استقراراً للردود الحرة
     messages: [{role:"system", content: sys},...messages],
     temperature: 0.3, max_tokens: 1000
   })
@@ -82,7 +82,7 @@ async function startBot(){
     const sender = msg.key.participant || from
     const senderNum = sender.replace(/[^0-9]/g,'')
     
-    // التحقق هل العضو مكتوم برمجياً؟ (لأنها مو مشرف بالقروب)
+    // التحقق هل العضو مكتوم برمجياً؟
     if(mutedDB[senderNum]) return
 
     const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim()
@@ -92,7 +92,7 @@ async function startBot(){
 
     const isBotMentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.includes('5656501284') || text.includes('سيل') || text.includes('Ciel')
 
-    // 1. صلاحيات اللورد المطلقة (كتم، فك كتم، القائمة 001، الخصم، الإضافة)
+    // 1. صلاحيات اللورد المطلقة
     if(isLord(sender)){
       if(text === 'سييل اعرضي القائمة 001' || text === 'سيل اعرضي القائمة 001'){
         let report = `📋 *قائمة اللورد السرية (001):*\n\n`
@@ -104,7 +104,6 @@ async function startBot(){
         await sock.sendMessage(from, {text: report}, {quoted: msg})
         return
       }
-      // أمر كتم عضو: كتم [الرقم]
       if(text.startsWith('كتم ')){
         let targetNum = text.replace('كتم','').trim().replace(/[^0-9]/g,'')
         if(targetNum){
@@ -114,7 +113,6 @@ async function startBot(){
         }
         return
       }
-      // أمر فك الكتم: فك كتم [الرقم]
       if(text.startsWith('فك كتم ')){
         let targetNum = text.replace('فك كتم','').trim().replace(/[^0-9]/g,'')
         if(targetNum){
@@ -193,7 +191,8 @@ async function startBot(){
       addMem(sender, 'assistant', reply)
       await sock.sendMessage(from, {text: reply}, {quoted: msg})
     }catch(e){
-      await sock.sendMessage(from, {text:'عذراً، حدث خطأ في معالجة الطلب.'}, {quoted: msg})
+      console.error("GROQ ERROR:", e)
+      await sock.sendMessage(from, {text:'عذراً يا ريوكا، حدث خطأ في معالجة الطلب.'}, {quoted: msg})
     }
     saveDB()
   })
