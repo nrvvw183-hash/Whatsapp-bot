@@ -48,7 +48,7 @@ async function askGroq(messages, extra=""){
 4. كوني دقيقة، منطقية، وصارمة في الردود. ${extra}`
 
   const c = await groq.chat.completions.create({
-    model: "openai/gpt-oss-120b", // تم التعديل إلى النموذج المطلوب
+    model: "openai/gpt-oss-20b", // التجربة بالنموذج المطلوب
     messages: [{role:"system", content: sys},...messages],
     temperature: 0.3, max_tokens: 1000
   })
@@ -158,7 +158,7 @@ async function startBot(){
       return
     }
 
-    // 3. نظام الملف الشخصي
+    // 3. نظام الملف الشخصي (تم إبقاؤها مستقلة وسريعة لكي لا تتأثر بالذكاء الاصطناعي)
     if(text === 'ملفي'){
       let currentNick = nickDB[senderNum] || 'غير محدد'
       let currentPoints = pointsDB[senderNum] || 0
