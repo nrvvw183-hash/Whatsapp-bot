@@ -1,12 +1,12 @@
-  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
 const { Boom } = require('@hapi/boom')
 const express = require('express')
 const qrcode = require('qrcode')
 const qrcodeTerminal = require('qrcode-terminal')
 const fs = require('fs')
-const { GoogleGenAI } = require('@google/genai')
+const { GoogleGenerativeAI } = require('@google/generative-ai')
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 const LORD_NUMBER = '966576388528'
 const LORD_NAME = "ريوكا (أوريليوس - السلايم)"
 const PORT = process.env.PORT || 3000
@@ -65,21 +65,29 @@ async function askGemini(messages){
 2. في مقارنات القوة، التزمي حصراً بروايات Web Novel / Light Novel (ريمورو تيمبيست يتجاوز مستويات Outerversal).
 3. كوني دقيقة، منطقية، وصارمة تماماً في إدارة النقاط والعقوبات.`
 
-  const formattedContents = messages.map(m => ({
+  const model = genAI.getGenerativeModel({ 
+    model: 'gemini-1.5-flash',
+    systemInstruction: sysInstruction
+  })
+
+  const chatHistory = messages.slice(0, -1).map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }]
   }))
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-1.5-flash',
-    contents: formattedContents,
-    config: {
-      systemInstruction: sysInstruction,
+  const lastMessage = messages[messages.length - 1].content
+
+  const chat = model.startChat({
+    history: chatHistory,
+    generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 1000
-    }
+      maxOutputTokens: 1000,
+    },
   })
-  return response.text
+
+  const result = await chat.sendMessage(lastMessage)
+  const response = await result.response
+  return response.text()
 }
 
 let qrCodeData = ''
@@ -313,4 +321,3 @@ async function startBot(){
   })
 }
 startBot()
-
