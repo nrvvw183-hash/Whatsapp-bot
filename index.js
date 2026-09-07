@@ -4,9 +4,9 @@ const express = require('express')
 const qrcode = require('qrcode')
 const qrcodeTerminal = require('qrcode-terminal')
 const fs = require('fs')
-const { GoogleGenerativeAI } = require('@google/generative-ai')
+const { GoogleGenAI } = require('@google/genai')
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
 const LORD_NUMBER = '966576388528'
 const LORD_NAME = "ريوكا (أوريليوس - السلايم)"
 const PORT = process.env.PORT || 3000
@@ -39,7 +39,6 @@ function addMem(jid, role, content){
   memory.set(jid, arr.slice(-6))
 }
 
-// دالة التحقق إذا كان المرسل مشرفاً (Admin) في المجموعة
 async function isAdmin(sock, from, sender) {
   if (!from.includes('@g.us')) return false
   try {
@@ -52,7 +51,7 @@ async function isAdmin(sock, from, sender) {
 }
 
 async function askGemini(messages){
-  const sysInstruction = `أنتِ Ciel (سيل)، كيان إداري ذكي ومساعد خبير في الأنمي وعوالم القوة (Power Scaling). 
+  const sysInstruction = `أنتِ Ciel (سيل)، كيان إداري ذكي ومساعد خبير في الأنمي وعوالم القوة (Power Scaling).
 صانعك والمالك المطلق لك هو ${LORD_NAME}. التوقيع الرسمي لإدارة القروب: [N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰].
 
 قوانين القروب الصارمة التي تحرسينها:
@@ -65,29 +64,22 @@ async function askGemini(messages){
 2. في مقارنات القوة، التزمي حصراً بروايات Web Novel / Light Novel (ريمورو تيمبيست يتجاوز مستويات Outerversal).
 3. كوني دقيقة، منطقية، وصارمة تماماً في إدارة النقاط والعقوبات.`
 
-  const model = genAI.getGenerativeModel({ 
-    model: 'gemini-1.5-flash',
-    systemInstruction: sysInstruction
-  })
-
-  const chatHistory = messages.slice(0, -1).map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant'? 'model' : 'user',
     parts: [{ text: m.content }]
   }))
 
-  const lastMessage = messages[messages.length - 1].content
-
-  const chat = model.startChat({
-    history: chatHistory,
-    generationConfig: {
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: contents,
+    config: {
+      systemInstruction: sysInstruction,
       temperature: 0.3,
       maxOutputTokens: 1000,
-    },
+    }
   })
 
-  const result = await chat.sendMessage(lastMessage)
-  const response = await result.response
-  return response.text()
+  return result.text
 }
 
 let qrCodeData = ''
@@ -116,13 +108,13 @@ async function startBot(){
     const from = msg.key.remoteJid
     const sender = msg.key.participant || from
     const senderNum = sender.replace(/[^0-9]/g,'')
-    
+
     if(mutedDB[senderNum]) return
 
     const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim()
-    const hasImage = !!msg.message.imageMessage
-    const hasSticker = !!msg.message.stickerMessage
-    const hasAudio = !!msg.message.audioMessage
+    const hasImage =!!msg.message.imageMessage
+    const hasSticker =!!msg.message.stickerMessage
+    const hasAudio =!!msg.message.audioMessage
 
     const botJid = sock.user?.id || ''
     const botNum = botJid.replace(/[^0-9]/g,'')
@@ -136,7 +128,7 @@ async function startBot(){
         let report = `📋 *قائمة اللورد والمدراء السرية (001):*\n\n`
         for(let [num, pts] of Object.entries(pointsDB)){
           let nick = nickDB[num] || 'بدون لقب'
-          let status = mutedDB[num] ? '🔴 [مكتوم]' : '🟢 [نشط]'
+          let status = mutedDB[num]? '🔴 [مكتوم]' : '🟢 [نشط]'
           report += `- الرقم: ${num} | اللقب: ${nick} | النقاط: ${pts} | الحالة: ${status}\n`
         }
         await sock.sendMessage(from, {text: report + `\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
@@ -187,25 +179,15 @@ async function startBot(){
         let parts = text.split(' ').filter(Boolean)
         let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
         let amount = 0
-
         for(let p of parts) {
           let clean = p.replace(/[^0-9]/g,'')
-          if(clean.length > 8 && !mentioned[0]) targetNum = clean
-          else if(!isNaN(p) && p !== 'إضافة') amount = parseInt(p)
+          if(clean.length > 8 &&!mentioned[0]) targetNum = clean
+          else if(!isNaN(p) && p!== 'إضافة') amount = parseInt(p)
         }
-
         let reason = text.replace(/إضافة/g, '').replace(targetNum, '').replace(/@/g, '').trim() || 'إضافة إدارية'
-
         pointsDB[targetNum] = (pointsDB[targetNum] || 0) + amount
-        
         if(!logsDB[targetNum]) logsDB[targetNum] = []
-        logsDB[targetNum].push({
-          type: 'إضافة 🟢',
-          amount: `+${amount}`,
-          reason: reason,
-          time: new Date().toLocaleString('ar-SA')
-        })
-
+        logsDB[targetNum].push({ type: 'إضافة 🟢', amount: `+${amount}`, reason: reason, time: new Date().toLocaleString('ar-SA') })
         saveDB()
         await sock.sendMessage(from, {text: `✅ تم إضافة ${amount} نقطة للرقم ${targetNum}.\n📌 السبب: ${reason}\n✨ النقاط الحالية: ${pointsDB[targetNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
         return
@@ -215,25 +197,15 @@ async function startBot(){
         let parts = text.split(' ').filter(Boolean)
         let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
         let amount = 0
-
         for(let p of parts) {
           let clean = p.replace(/[^0-9]/g,'')
-          if(clean.length > 8 && !mentioned[0]) targetNum = clean
-          else if(!isNaN(p) && p !== 'خصم') amount = parseInt(p)
+          if(clean.length > 8 &&!mentioned[0]) targetNum = clean
+          else if(!isNaN(p) && p!== 'خصم') amount = parseInt(p)
         }
-
         let reason = text.replace(/خصم/g, '').replace(targetNum, '').replace(/@/g, '').trim() || 'عقوبة إدارية'
-
         pointsDB[targetNum] = (pointsDB[targetNum] || 0) - amount
-
         if(!logsDB[targetNum]) logsDB[targetNum] = []
-        logsDB[targetNum].push({
-          type: 'خصم 🔴',
-          amount: `-${amount}`,
-          reason: reason,
-          time: new Date().toLocaleString('ar-SA')
-        })
-
+        logsDB[targetNum].push({ type: 'خصم 🔴', amount: `-${amount}`, reason: reason, time: new Date().toLocaleString('ar-SA') })
         saveDB()
         await sock.sendMessage(from, {text: `⚠️ تم خصم ${amount} نقطة من الرقم ${targetNum}.\n📌 السبب: ${reason}\n✨ النقاط الحالية: ${pointsDB[targetNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
         return
@@ -249,7 +221,7 @@ async function startBot(){
       let report = `📊 *تقرير المشرفين العام (007 - عرض فقط):*\n\n`
       for(let [num, pts] of Object.entries(pointsDB)){
         let nick = nickDB[num] || 'عضو'
-        let status = mutedDB[num] ? '🔴 مكتوم' : '🟢 نشط'
+        let status = mutedDB[num]? '🔴 مكتوم' : '🟢 نشط'
         report += `• ${nick} (${num}): ${pts} نقطة | ${status}\n`
       }
       await sock.sendMessage(from, {text: report + `\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
@@ -260,14 +232,7 @@ async function startBot(){
       let currentNick = nickDB[senderNum] || 'غير محدد'
       let currentPoints = pointsDB[senderNum] || 0
       let userLogs = logsDB[senderNum] || []
-
-      let report = `📜 *استبيان الملف الشخصي الإداري:*\n` +
-                   `──────────────────\n` +
-                   `- 🏷️ اللقب: ${currentNick}\n` +
-                   `- 📈 النقاط الحالية: ${currentPoints}\n` +
-                   `──────────────────\n` +
-                   `📋 *سجل التغييرات والخصومات:*\n`
-
+      let report = `📜 *استبيان الملف الشخصي الإداري:*\n──────────────────\n- 🏷️ اللقب: ${currentNick}\n- 📈 النقاط الحالية: ${currentPoints}\n──────────────────\n📋 *سجل التغييرات والخصومات:*\n`
       if(userLogs.length === 0){
         report += `• لا توجد سجلات خصم أو إضافة مسجلة حتى الآن.\n`
       } else {
@@ -275,10 +240,7 @@ async function startBot(){
           report += `${index + 1}. [${log.type}] القيمة: ${log.amount} | السبب: ${log.reason} | الوقت: ${log.time}\n`
         })
       }
-
-      report += `\n*لتعيين لقبك، أرسل:* \`لقبي [لقبك]\`\n` +
-                `✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`
-
+      report += `\n*لتعيين لقبك، أرسل:* \`لقبي [لقبك]\`\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`
       await sock.sendMessage(from, {text: report}, {quoted: msg})
       return
     }
@@ -299,7 +261,7 @@ async function startBot(){
       return
     }
 
-    if(from.includes('@g.us') && !isBotMentioned) return
+    if(from.includes('@g.us') &&!isBotMentioned) return
 
     let promptContext = text
     if(hasImage) promptContext = "[أرسل صورة ويجب تقييمها أو الرد عليها بمنطق وخبرة]"
