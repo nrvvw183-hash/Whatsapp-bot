@@ -90,7 +90,7 @@ app.listen(PORT, ()=> console.log('Server on '+PORT))
 
 async function startBot(){
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_v2')
-  const sock = makeWASocket({
+  const sock =  makeWASocket({
   auth: state,
   connectTimeoutMs: 60000,
   retryRequestDelayMs: 5000,
@@ -133,4 +133,158 @@ async function startBot(){
         let report = `📋 *قائمة اللورد والمدراء السرية (001):*\n\n`
         for(let [num, pts] of Object.entries(pointsDB)){
           let nick = nickDB[num] || 'بدون لقب'
-          let status = mutedDB[num]? '🔴 [مكتوم]'
+          let status = mutedDB[num]? '🔴 [مكتوم]' : '🟢 [نشط]'
+          report += `- الرقم: ${num} | اللقب: ${nick} | النقاط: ${pts} | الحالة: ${status}\n`
+        }
+        await sock.sendMessage(from, {text: report + `\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+        return
+      }
+
+      if(text.startsWith('طرد') || text.includes('kick')){
+        if(!from.includes('@g.us')) return
+        let target = mentioned[0]
+        if(!target){
+          let cleanNum = text.replace(/[^0-9]/g,'')
+          if(cleanNum.length > 8) target = cleanNum + '@s.whatsapp.net'
+        }
+        if(target){
+          try {
+            await sock.groupParticipantsUpdate(from, [target], "remove")
+            await sock.sendMessage(from, {text: `✅ تم تنفيذ أمر الطرد بنجاح من المجموعة.\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+          } catch(err) {
+            await sock.sendMessage(from, {text: `⚠️ عذراً، تأكد أن البوت مشرف بالقروب لكي يتمكن من الطرد.`}, {quoted: msg})
+          }
+        } else {
+          await sock.sendMessage(from, {text: '⚠️ منشن الشخص أو اكتب رقمه لطرده.'}, {quoted: msg})
+        }
+        return
+      }
+
+      if(text.startsWith('كتم ')){
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('كتم','').trim().replace(/[^0-9]/g,'')
+        if(targetNum){
+          mutedDB[targetNum] = true
+          saveDB()
+          await sock.sendMessage(from, {text: `🔇 تم كتم العضو ${targetNum} برمجياً بنجاح بواسطة الإدارة.`}, {quoted: msg})
+        }
+        return
+      }
+
+      if(text.startsWith('فك كتم ')){
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('فك كتم','').trim().replace(/[^0-9]/g,'')
+        if(targetNum){
+          delete mutedDB[targetNum]
+          saveDB()
+          await sock.sendMessage(from, {text: `🔊 تم رفع الكتم عن العضو ${targetNum}.`}, {quoted: msg})
+        }
+        return
+      }
+
+      if(text.startsWith('إضافة ')){
+        let parts = text.split(' ').filter(Boolean)
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
+        let amount = 0
+        for(let p of parts) {
+          let clean = p.replace(/[^0-9]/g,'')
+          if(clean.length > 8 &&!mentioned[0]) targetNum = clean
+          else if(!isNaN(p) && p!== 'إضافة') amount = parseInt(p)
+        }
+        let reason = text.replace(/إضافة/g, '').replace(targetNum, '').replace(/@/g, '').trim() || 'إضافة إدارية'
+        pointsDB[targetNum] = (pointsDB[targetNum] || 0) + amount
+        if(!logsDB[targetNum]) logsDB[targetNum] = []
+        logsDB[targetNum].push({ type: 'إضافة 🟢', amount: `+${amount}`, reason: reason, time: new Date().toLocaleString('ar-SA') })
+        saveDB()
+        await sock.sendMessage(from, {text: `✅ تم إضافة ${amount} نقطة للرقم ${targetNum}.\n📌 السبب: ${reason}\n✨ النقاط الحالية: ${pointsDB[targetNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+        return
+      }
+
+      if(text.startsWith('خصم ')){
+        let parts = text.split(' ').filter(Boolean)
+        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
+        let amount = 0
+        for(let p of parts) {
+          let clean = p.replace(/[^0-9]/g,'')
+          if(clean.length > 8 &&!mentioned[0]) targetNum = clean
+          else if(!isNaN(p) && p!== 'خصم') amount = parseInt(p)
+        }
+        let reason = text.replace(/خصم/g, '').replace(targetNum, '').replace(/@/g, '').trim() || 'عقوبة إدارية'
+        pointsDB[targetNum] = (pointsDB[targetNum] || 0) - amount
+        if(!logsDB[targetNum]) logsDB[targetNum] = []
+        logsDB[targetNum].push({ type: 'خصم 🔴', amount: `-${amount}`, reason: reason, time: new Date().toLocaleString('ar-SA') })
+        saveDB()
+        await sock.sendMessage(from, {text: `⚠️ تم خصم ${amount} نقطة من الرقم ${targetNum}.\n📌 السبب: ${reason}\n✨ النقاط الحالية: ${pointsDB[targetNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+        return
+      }
+    } else {
+      if(text.startsWith('طرد') || text.startsWith('كتم ') || text.startsWith('إضافة ') || text.startsWith('خصم ')){
+        await sock.sendMessage(from, {text: `🚫 عذراً، هذا الأمر مخصص للمشرفين (الأدمن) فقط!\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+        return
+      }
+    }
+
+    if(text === 'سيل التقارير 007' || text === 'سييل التقارير 007'){
+      let report = `📊 *تقرير المشرفين العام (007 - عرض فقط):*\n\n`
+      for(let [num, pts] of Object.entries(pointsDB)){
+        let nick = nickDB[num] || 'عضو'
+        let status = mutedDB[num]? '🔴 مكتوم' : '🟢 نشط'
+        report += `• ${nick} (${num}): ${pts} نقطة | ${status}\n`
+      }
+      await sock.sendMessage(from, {text: report + `\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+      return
+    }
+
+    if(text === 'ملفي'){
+      let currentNick = nickDB[senderNum] || 'غير محدد'
+      let currentPoints = pointsDB[senderNum] || 0
+      let userLogs = logsDB[senderNum] || []
+      let report = `📜 *استبيان الملف الشخصي الإداري:*\n──────────────────\n- 🏷️ اللقب: ${currentNick}\n- 📈 النقاط الحالية: ${currentPoints}\n──────────────────\n📋 *سجل التغييرات والخصومات:*\n`
+      if(userLogs.length === 0){
+        report += `• لا توجد سجلات خصم أو إضافة مسجلة حتى الآن.\n`
+      } else {
+        userLogs.forEach((log, index) => {
+          report += `${index + 1}. [${log.type}] القيمة: ${log.amount} | السبب: ${log.reason} | الوقت: ${log.time}\n`
+        })
+      }
+      report += `\n*لتعيين لقبك، أرسل:* \`لقبي [لقبك]\`\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`
+      await sock.sendMessage(from, {text: report}, {quoted: msg})
+      return
+    }
+
+    if(text.startsWith('لقبي ') || text.includes('اللقب الخاص بي')){
+      let newNick = text.replace('لقبي','').replace('اللقب الخاص بي','').replace('سيل','').trim()
+      if(newNick){
+        nickDB[senderNum] = newNick
+        saveDB()
+        await sock.sendMessage(from,{text:`✨ تم حفظ لقبك بنجاح إلى: "${newNick}"\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰`}, {quoted: msg})
+      }
+      return
+    }
+
+    if(text === 'نقاطي'){
+      if(pointsDB[senderNum] === undefined) pointsDB[senderNum] = 0
+      await sock.sendMessage(from,{text:`✨ نقاطك الحالية: ${pointsDB[senderNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+      return
+    }
+
+    if(from.includes('@g.us') && !isBotMentioned) return
+
+    let promptContext = text
+    if(hasImage) promptContext = "[أرسل صورة ويجب تقييمها أو الرد عليها بمنطق وخبرة]"
+    if(hasSticker) promptContext = "[أرسل ملصقاً ويجب التعليق عليه بذكاء أو تفاعل]"
+    if(hasAudio) promptContext = "[أرسل رسالة صوتية ويجب التفاعل معها]"
+
+    if(!promptContext) return
+
+    addMem(sender, 'user', promptContext)
+    try{
+      const reply = await askGemini(getMem(sender))
+      addMem(sender, 'assistant', reply)
+      await sock.sendMessage(from, {text: reply + `\n\n> ⋰ ⟯ أَبْرَقَتْ ٱلْنُجُومُ وَشَرَقَتِ ٱلْأَنْوَارُ.. ٱلْتَزِمْ بِٱلْقَوَانِينِ لِتَتَجَنَبَ خَسَارَةَ نِقَاطِكَ 🏰 ⋰ ⟯\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
+    }catch(e){
+      console.error("GEMINI ERROR:", e)
+      await sock.sendMessage(from, {text:'عذراً يا ريوكا، حدث خطأ في معالجة الطلب عبر Gemini.'}, {quoted: msg})
+    }
+    saveDB()
+  })
+}
+startBot()
