@@ -90,7 +90,7 @@ app.listen(PORT, ()=> console.log('Server on '+PORT))
 
 async function startBot(){
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_v2')
-  const sock =const sock = makeWASocket({
+  const sock = makeWASocket({
   auth: state,
   connectTimeoutMs: 60000,
   retryRequestDelayMs: 5000,
