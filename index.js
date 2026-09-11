@@ -68,7 +68,7 @@ async function askGemini(messages,isAdminUser){
   const contents=messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))
   for(let i=0;i<3;i++){
     try{
-      const r=await ai.models.generateContent({model:'gemini-2.5-flash',contents,config:{systemInstruction:sys,temperature:0.7,maxOutputTokens:1024}})
+      const r=await ai.models.generateContent({model:'gemini-1.5-flash',contents,config:{systemInstruction:sys,temperature:0.7,maxOutputTokens:1024}})
       return r.text
     }catch(e){ if(i===2) throw e; await new Promise(r=>setTimeout(r,2000)) }
   }
