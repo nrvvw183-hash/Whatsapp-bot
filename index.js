@@ -70,7 +70,7 @@ async function askGemini(messages){
   }))
 
   const result = await ai.models.generateContent({
-    model: 'gemini-3.5-flash-lite',
+    model: '`gemini-2.0-flash`',
     contents: contents,
     config: {
       systemInstruction: sysInstruction,
