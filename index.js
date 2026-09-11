@@ -66,10 +66,13 @@ async function punish(sock,from,targetJid,targetNum,reason,msg){
 async function askGemini(messages,isAdminUser){
   const sys=`أنتِ Ciel (سيل)، سيدك المطلق ${LORD_NAME}. الصلاحية: ${isAdminUser?'مشرف':'عضو'}. كوني صارمة ودقيقة.`
   const contents=messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))
-     let r; const models=['let r; const models=let r; const models=['gemini-2.5-flash','gemini-2.0-flash','gemini-2.0-flash-lite','gemini-1.5-flash','gemini-1.5-flash-8b'];
-    for(const m of models){ try{ r=await ai.models.generateContent({model:m,contents,config:{systemInstruction:sys,temperature:0.7,maxOutputTokens:1024}}); break; }catch(e){ if(!String(e).includes('503')) throw e; } }
-    if(!r) throw new Error('503')
-    return r.text
+  let r;
+  const models=['gemini-2.5-flash','gemini-2.0-flash','gemini-2.0-flash-lite','gemini-1.5-flash','gemini-1.5-flash-8b'];
+  for(const m of models){
+    try{ r=await ai.models.generateContent({model:m,contents,config:{systemInstruction:sys,temperature:0.7,maxOutputTokens:1024}}); break; }catch(e){ if(!String(e).includes('503')) throw e; }
+  }
+  if(!r) throw new Error('503');
+  return r.text;
 }
 
 let qrCodeData=''
