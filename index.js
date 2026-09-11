@@ -66,12 +66,10 @@ async function punish(sock,from,targetJid,targetNum,reason,msg){
 async function askGemini(messages,isAdminUser){
   const sys=`أنتِ Ciel (سيل)، سيدك المطلق ${LORD_NAME}. الصلاحية: ${isAdminUser?'مشرف':'عضو'}. كوني صارمة ودقيقة.`
   const contents=messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))
-  for(let i=0;i<3;i++){
-    try{
-      const r=await ai.models.generateContent({model:'gemini-1.5-flash',contents,config:{systemInstruction:sys,temperature:0.7,maxOutputTokens:1024}})
-      return r.text
-    }catch(e){ if(i===2) throw e; await new Promise(r=>setTimeout(r,2000)) }
-  }
+     let r; const models=['gemini-2.0-flash-lite','gemini-1.5-flash-8b','gemini-2.0-flash'];
+    for(const m of models){ try{ r=await ai.models.generateContent({model:m,contents,config:{systemInstruction:sys,temperature:0.7,maxOutputTokens:1024}}); break; }catch(e){ if(!String(e).includes('503')) throw e; } }
+    if(!r) throw new Error('503')
+    return r.text
 }
 
 let qrCodeData=''
