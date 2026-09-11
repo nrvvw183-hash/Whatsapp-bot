@@ -82,7 +82,7 @@ app.get('/ping',(req,res)=>res.send('pong'))
 app.listen(PORT,()=>console.log('Server on '+PORT))
 
 async function startBot(){
-  const {state,saveCreds}=await useMultiFileAuthState('auth_info_v2')
+  const {state,saveCreds}=await useMultiFileAuthState('auth_info_v3')
   const sock=makeWASocket({auth:state,connectTimeoutMs:60000,retryRequestDelayMs:5000,defaultQueryTimeoutMs:60000})
   sock.ev.on('creds.update',saveCreds)
   sock.ev.on('connection.update',async(u)=>{
