@@ -10,281 +10,178 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
 const LORD_NUMBER = '966576388528'
 const LORD_NAME = "ريوكا (أوريليوس - السلايم)"
 const PORT = process.env.PORT || 3000
+const SIGN = `\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`
 
-let pointsDB = {}, nickDB = {}, mutedDB = {}, logsDB = {}
-try { pointsDB = JSON.parse(fs.readFileSync('./points.json','utf8')) } catch(e){}
-try { nickDB = JSON.parse(fs.readFileSync('./nicknames.json','utf8')) } catch(e){}
-try { mutedDB = JSON.parse(fs.readFileSync('./muted.json','utf8')) } catch(e){}
-try { logsDB = JSON.parse(fs.readFileSync('./logs.json','utf8')) } catch(e){}
-
-function saveDB(){
-  try{
-    fs.writeFileSync('./points.json', JSON.stringify(pointsDB))
-    fs.writeFileSync('./nicknames.json', JSON.stringify(nickDB))
-    fs.writeFileSync('./muted.json', JSON.stringify(mutedDB))
-    fs.writeFileSync('./logs.json', JSON.stringify(logsDB))
-  }catch(e){}
-}
+// ---------- DB ----------
+let DB = { points:{}, nick:{}, muted:{}, warnings:{}, bans:{}, words:[], settings:{}, logs:{} }
+for(let k of Object.keys(DB)){ try{ DB[k]=JSON.parse(fs.readFileSync('./'+k+'.json','utf8')) }catch(e){} }
+function saveDB(){ for(let k of Object.keys(DB)){ try{ fs.writeFileSync('./'+k+'.json', JSON.stringify(DB[k])) }catch(e){} } }
+// backup كل ساعة
+setInterval(()=>{ try{ fs.copyFileSync('./points.json','./backup_points.json') }catch(e){} }, 3600000)
 
 const memory = new Map()
-const isLord = (jid) => jid.replace(/[^0-9]/g,'').includes(LORD_NUMBER)
+const spamDB = new Map()
+const isLord = (jid='') => jid.replace(/[^0-9]/g,'').includes(LORD_NUMBER)
 
 function getMem(jid){
-  let arr = memory.get(jid) || []
-  arr = arr.filter(m => Date.now() - m.time < 24*3600*1000).slice(-6)
-  memory.set(jid, arr); return arr
+  let arr = (memory.get(jid)||[]).filter(m=>Date.now()-m.time<24*3600*1000).slice(-10)
+  memory.set(jid,arr); return arr
 }
-function addMem(jid, role, content){
-  let arr = getMem(jid); arr.push({role, content, time: Date.now()})
-  memory.set(jid, arr.slice(-6))
-}
+function addMem(jid,role,content){ let a=getMem(jid); a.push({role,content,time:Date.now()}); memory.set(jid,a.slice(-10)) }
 
-async function isAdmin(sock, from, sender) {
-  if (!from.includes('@g.us')) return false
-  try {
-    const metadata = await sock.groupMetadata(from)
-    const admins = metadata.participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin').map(p => p.id)
-    return admins.includes(sender) || isLord(sender)
-  } catch (e) {
-    return false
+async function isAdmin(sock,from,sender){
+  if(!from.includes('@g.us')) return false
+  if(isLord(sender)) return true
+  try{
+    const meta=await sock.groupMetadata(from)
+    return meta.participants.filter(p=>p.admin).map(p=>p.id).includes(sender)
+  }catch(e){ return false }
+}
+function getSettings(from){
+  if(!DB.settings[from]) DB.settings[from]={ antiLink:true, antiSpam:true, allowedMedia:{image:true,sticker:true,audio:true,video:true}, warnLimit:3 }
+  return DB.settings[from]
+}
+function addLog(num,action,by){
+  if(!DB.logs[num]) DB.logs[num]=[]
+  DB.logs[num].push({action,by,time:new Date().toLocaleString('ar-SA')})
+  if(DB.logs[num].length>50) DB.logs[num]=DB.logs[num].slice(-50)
+  saveDB()
+}
+async function punish(sock,from,targetJid,targetNum,reason,msg,type='warn'){
+  if(isLord(targetJid)) return
+  if(await isAdmin(sock,from,targetJid)) return
+  const st=getSettings(from)
+  DB.warnings[targetNum]=DB.warnings[targetNum]||[]
+  DB.warnings[targetNum].push({reason,type,time:new Date().toLocaleString('ar-SA')})
+  addLog(targetNum,`تحذير: ${reason}`,msg?.key?.participant||'system')
+  const c=DB.warnings[targetNum].length
+  if(c>=st.warnLimit){
+    DB.muted[targetNum]=true; saveDB()
+    await sock.sendMessage(from,{text:`🚫 ${targetNum} وصل ${c} تحذيرات وتم كتمه.\n📌 ${reason}${SIGN}`})
+  }else{
+    saveDB()
+    await sock.sendMessage(from,{text:`⚠️ تحذير ${c}/${st.warnLimit} لـ ${targetNum}\n📌 السبب: ${reason}`,},{quoted:msg})
   }
 }
 
-async function askGemini(messages){
-  const sysInstruction = `أنتِ Ciel (سيل)، كيان إداري ذكي ومساعد خبير في الأنمي وعوالم القوة (Power Scaling).
-صانعك والمالك المطلق لك هو ${LORD_NAME}. التوقيع الرسمي لإدارة القروب: [N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰].
-
-قوانين القروب الصارمة التي تحرسينها:
-- المخالفات والإنذارات: إرسال GIF خارج الأنمي، ملصقات كيبوب أو مخلة، سبام الملصقات (3 ورا بعد)، سبام الرسائل (9 رسائل منها 3 بدون فائدة)، التشفير، الهنتاي والايتشي، العنصرية، السياسة، اللهجة أو اللغة غير العربية، التحدث عن حلقات لم يمض عليها 7 ساعات، التنمر، صوتيات البنات، الصعقات الصوتية، مقاطع خارج الأنمي في غير الأيام المفتوحة، الحذف المتكرر، طلب الرتب، واستخدام الذكاء الاصطناعي.
-- الطرد المؤقت: الاحتكاك غير اللائق، الاعتراض على المشرفين، الاتصال بالقروب (3 طرد مؤقت تحول لمؤبد).
-- الطرد المؤبد: الحرق، نشر قروبات أخرى، هنتاي (+18)، التخريب، التهديد بالباند، السب والشتم، إرسال ملصقات دفعة واحدة، إرسال صور الوجه، افتعال المشاكل، الابتزاز، إرسال مقاطع غير لائقة، والخروج والدخول المتكرر.
-
-قواعد الردود:
-1. إذا سأل أي شخص عن سيدك أو صانعك، أجيبي بدقة تامة: "سيدي ومالكي هو ريوكا (أوريليوس - السلايم)".
-2. في مقارنات القوة، التزمي حصراً بروايات Web Novel / Light Novel (ريمورو تيمبيست يتجاوز مستويات Outerversal).
-3. كوني دقيقة، منطقية، وصارمة تماماً في إدارة النقاط والعقوبات.`
-
-  const contents = messages.map(m => ({
-    role: m.role === 'assistant'? 'model' : 'user',
-    parts: [{ text: m.content }]
-  }))
-
-  const result = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
-    contents: contents,
-    config: {
-      systemInstruction: sysInstruction,
-      temperature: 0.3,
-      maxOutputTokens: 1000,
-    }
-  })
-
-  return result.text
+async function askGemini(messages,isAdminUser){
+  const sys=`أنتِ Ciel (سيل)، كيان إداري ذكي. سيدك المطلق ${LORD_NAME}. التوقيع: [N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰].
+  الصلاحية: ${isAdminUser?'مشرف':'عضو'}. كوني صارمة ودقيقة. ممنوع مخالفة القوانين.`
+  const contents=messages.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}))
+  // retry 3 مرات ضد 503
+  for(let i=0;i<3;i++){
+    try{
+      const r=await ai.models.generateContent({model:'gemini-3.6-flash',contents,config:{systemInstruction:sys,temperature:0.3,maxOutputTokens:800}})
+      return r.text
+    }catch(e){ if(i===2) throw e; await new Promise(r=>setTimeout(r,2000)) }
+  }
 }
 
-let qrCodeData = ''
-const app = express()
-app.get('/', (req,res)=>{ qrCodeData? res.send(`<h2>امسح QR سيل</h2><img src="${qrCodeData}"/>`) : res.send('<h2>سيل شغالة - OK</h2>') })
-app.get('/ping', (req,res)=> res.send('pong'))
-app.listen(PORT, ()=> console.log('Server on '+PORT))
+let qrCodeData=''
+const app=express()
+app.get('/',(req,res)=>{ qrCodeData?res.send(`<h2>امسح QR سيل</h2><img src="${qrCodeData}"/>`):res.send('<h2>سيل شغالة - OK</h2>') })
+app.get('/ping',(req,res)=>res.send('pong'))
+app.listen(PORT,()=>console.log('Server on '+PORT))
 
 async function startBot(){
-  const { state, saveCreds } = await useMultiFileAuthState('auth_info_v2')
-  const sock =  makeWASocket({
-  auth: state,
-  connectTimeoutMs: 60000,
-  retryRequestDelayMs: 5000,
-  defaultQueryTimeoutMs: 60000
-})
-  sock.ev.on('creds.update', saveCreds)
-
-  sock.ev.on('connection.update', async (u)=>{
-    const { connection, lastDisconnect, qr } = u
-    if(qr){ qrCodeData = await qrcode.toDataURL(qr); qrcodeTerminal.generate(qr, {small:true}) }
-    if(connection === 'close'){
-      const code = (lastDisconnect?.error instanceof Boom)?.output?.statusCode
-      if(code!== DisconnectReason.loggedOut) startBot()
-    } else if(connection === 'open'){ qrCodeData=''; console.log('سيل متصلة بنجاح مع Gemini ⚡ [N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰]') }
+  const {state,saveCreds}=await useMultiFileAuthState('auth_info_v2')
+  const sock=makeWASocket({auth:state,connectTimeoutMs:60000,retryRequestDelayMs:5000,defaultQueryTimeoutMs:60000})
+  sock.ev.on('creds.update',saveCreds)
+  sock.ev.on('connection.update',async(u)=>{
+    const {connection,lastDisconnect,qr}=u
+    if(qr){ qrCodeData=await qrcode.toDataURL(qr); qrcodeTerminal.generate(qr,{small:true}) }
+    if(connection==='close'){
+      const code=(lastDisconnect?.error instanceof Boom)?.output?.statusCode
+      if(code!==DisconnectReason.loggedOut){ console.log('إعادة اتصال...'); setTimeout(startBot,5000) }
+    }else if(connection==='open'){ qrCodeData=''; console.log('سيل متصلة ⚡') }
   })
 
-  sock.ev.on('messages.upsert', async ({ messages })=>{
-    const msg = messages[0]
-    if(!msg.message || msg.key.fromMe) return
-    const from = msg.key.remoteJid
-    const sender = msg.key.participant || from
-    const senderNum = sender.replace(/[^0-9]/g,'')
-
-    if(mutedDB[senderNum]) return
-
-    const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim()
-    const hasImage =!!msg.message.imageMessage
-    const hasSticker =!!msg.message.stickerMessage
-    const hasAudio =!!msg.message.audioMessage
-
-    const botJid = sock.user?.id || ''
-    const botNum = botJid.replace(/[^0-9]/g,'')
-    const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || []
-    const isBotMentioned = mentioned.some(j => j.replace(/[^0-9]/g,'').includes(botNum)) || text.includes('سيل') || text.includes('Ciel')
-
-    const userIsAdmin = await isAdmin(sock, from, sender)
-
-    if(userIsAdmin){
-      if(text.includes('القائمة 001')){
-        let report = `📋 *قائمة اللورد والمدراء السرية (001):*\n\n`
-        for(let [num, pts] of Object.entries(pointsDB)){
-          let nick = nickDB[num] || 'بدون لقب'
-          let status = mutedDB[num]? '🔴 [مكتوم]' : '🟢 [نشط]'
-          report += `- الرقم: ${num} | اللقب: ${nick} | النقاط: ${pts} | الحالة: ${status}\n`
-        }
-        await sock.sendMessage(from, {text: report + `\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-        return
-      }
-
-      if(text.startsWith('طرد') || text.includes('kick')){
-        if(!from.includes('@g.us')) return
-        let target = mentioned[0]
-        if(!target){
-          let cleanNum = text.replace(/[^0-9]/g,'')
-          if(cleanNum.length > 8) target = cleanNum + '@s.whatsapp.net'
-        }
-        if(target){
-          try {
-            await sock.groupParticipantsUpdate(from, [target], "remove")
-            await sock.sendMessage(from, {text: `✅ تم تنفيذ أمر الطرد بنجاح من المجموعة.\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-          } catch(err) {
-            await sock.sendMessage(from, {text: `⚠️ عذراً، تأكد أن البوت مشرف بالقروب لكي يتمكن من الطرد.`}, {quoted: msg})
-          }
-        } else {
-          await sock.sendMessage(from, {text: '⚠️ منشن الشخص أو اكتب رقمه لطرده.'}, {quoted: msg})
-        }
-        return
-      }
-
-      if(text.startsWith('كتم ')){
-        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('كتم','').trim().replace(/[^0-9]/g,'')
-        if(targetNum){
-          mutedDB[targetNum] = true
-          saveDB()
-          await sock.sendMessage(from, {text: `🔇 تم كتم العضو ${targetNum} برمجياً بنجاح بواسطة الإدارة.`}, {quoted: msg})
-        }
-        return
-      }
-
-      if(text.startsWith('فك كتم ')){
-        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || text.replace('فك كتم','').trim().replace(/[^0-9]/g,'')
-        if(targetNum){
-          delete mutedDB[targetNum]
-          saveDB()
-          await sock.sendMessage(from, {text: `🔊 تم رفع الكتم عن العضو ${targetNum}.`}, {quoted: msg})
-        }
-        return
-      }
-
-      if(text.startsWith('إضافة ')){
-        let parts = text.split(' ').filter(Boolean)
-        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
-        let amount = 0
-        for(let p of parts) {
-          let clean = p.replace(/[^0-9]/g,'')
-          if(clean.length > 8 &&!mentioned[0]) targetNum = clean
-          else if(!isNaN(p) && p!== 'إضافة') amount = parseInt(p)
-        }
-        let reason = text.replace(/إضافة/g, '').replace(targetNum, '').replace(/@/g, '').trim() || 'إضافة إدارية'
-        pointsDB[targetNum] = (pointsDB[targetNum] || 0) + amount
-        if(!logsDB[targetNum]) logsDB[targetNum] = []
-        logsDB[targetNum].push({ type: 'إضافة 🟢', amount: `+${amount}`, reason: reason, time: new Date().toLocaleString('ar-SA') })
-        saveDB()
-        await sock.sendMessage(from, {text: `✅ تم إضافة ${amount} نقطة للرقم ${targetNum}.\n📌 السبب: ${reason}\n✨ النقاط الحالية: ${pointsDB[targetNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-        return
-      }
-
-      if(text.startsWith('خصم ')){
-        let parts = text.split(' ').filter(Boolean)
-        let targetNum = mentioned[0]?.replace(/[^0-9]/g,'') || senderNum
-        let amount = 0
-        for(let p of parts) {
-          let clean = p.replace(/[^0-9]/g,'')
-          if(clean.length > 8 &&!mentioned[0]) targetNum = clean
-          else if(!isNaN(p) && p!== 'خصم') amount = parseInt(p)
-        }
-        let reason = text.replace(/خصم/g, '').replace(targetNum, '').replace(/@/g, '').trim() || 'عقوبة إدارية'
-        pointsDB[targetNum] = (pointsDB[targetNum] || 0) - amount
-        if(!logsDB[targetNum]) logsDB[targetNum] = []
-        logsDB[targetNum].push({ type: 'خصم 🔴', amount: `-${amount}`, reason: reason, time: new Date().toLocaleString('ar-SA') })
-        saveDB()
-        await sock.sendMessage(from, {text: `⚠️ تم خصم ${amount} نقطة من الرقم ${targetNum}.\n📌 السبب: ${reason}\n✨ النقاط الحالية: ${pointsDB[targetNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-        return
-      }
-    } else {
-      if(text.startsWith('طرد') || text.startsWith('كتم ') || text.startsWith('إضافة ') || text.startsWith('خصم ')){
-        await sock.sendMessage(from, {text: `🚫 عذراً، هذا الأمر مخصص للمشرفين (الأدمن) فقط!\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-        return
-      }
-    }
-
-    if(text === 'سيل التقارير 007' || text === 'سييل التقارير 007'){
-      let report = `📊 *تقرير المشرفين العام (007 - عرض فقط):*\n\n`
-      for(let [num, pts] of Object.entries(pointsDB)){
-        let nick = nickDB[num] || 'عضو'
-        let status = mutedDB[num]? '🔴 مكتوم' : '🟢 نشط'
-        report += `• ${nick} (${num}): ${pts} نقطة | ${status}\n`
-      }
-      await sock.sendMessage(from, {text: report + `\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-      return
-    }
-
-    if(text === 'ملفي'){
-      let currentNick = nickDB[senderNum] || 'غير محدد'
-      let currentPoints = pointsDB[senderNum] || 0
-      let userLogs = logsDB[senderNum] || []
-      let report = `📜 *استبيان الملف الشخصي الإداري:*\n──────────────────\n- 🏷️ اللقب: ${currentNick}\n- 📈 النقاط الحالية: ${currentPoints}\n──────────────────\n📋 *سجل التغييرات والخصومات:*\n`
-      if(userLogs.length === 0){
-        report += `• لا توجد سجلات خصم أو إضافة مسجلة حتى الآن.\n`
-      } else {
-        userLogs.forEach((log, index) => {
-          report += `${index + 1}. [${log.type}] القيمة: ${log.amount} | السبب: ${log.reason} | الوقت: ${log.time}\n`
-        })
-      }
-      report += `\n*لتعيين لقبك، أرسل:* \`لقبي [لقبك]\`\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`
-      await sock.sendMessage(from, {text: report}, {quoted: msg})
-      return
-    }
-
-    if(text.startsWith('لقبي ') || text.includes('اللقب الخاص بي')){
-      let newNick = text.replace('لقبي','').replace('اللقب الخاص بي','').replace('سيل','').trim()
-      if(newNick){
-        nickDB[senderNum] = newNick
-        saveDB()
-        await sock.sendMessage(from,{text:`✨ تم حفظ لقبك بنجاح إلى: "${newNick}"\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰`}, {quoted: msg})
-      }
-      return
-    }
-
-    if(text === 'نقاطي'){
-      if(pointsDB[senderNum] === undefined) pointsDB[senderNum] = 0
-      await sock.sendMessage(from,{text:`✨ نقاطك الحالية: ${pointsDB[senderNum]}\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-      return
-    }
-
-    if(from.includes('@g.us') && !isBotMentioned) return
-
-    let promptContext = text
-    if(hasImage) promptContext = "[أرسل صورة ويجب تقييمها أو الرد عليها بمنطق وخبرة]"
-    if(hasSticker) promptContext = "[أرسل ملصقاً ويجب التعليق عليه بذكاء أو تفاعل]"
-    if(hasAudio) promptContext = "[أرسل رسالة صوتية ويجب التفاعل معها]"
-
-    if(!promptContext) return
-
-    addMem(sender, 'user', promptContext)
+  sock.ev.on('messages.upsert',async({messages})=>{
     try{
-      const reply = await askGemini(getMem(sender))
-      addMem(sender, 'assistant', reply)
-      await sock.sendMessage(from, {text: reply + `\n\n> ⋰ ⟯ أَبْرَقَتْ ٱلْنُجُومُ وَشَرَقَتِ ٱلْأَنْوَارُ.. ٱلْتَزِمْ بِٱلْقَوَانِينِ لِتَتَجَنَبَ خَسَارَةَ نِقَاطِكَ 🏰 ⋰ ⟯\n✺ تـــــــ✍🏻ـوقــيـع إداࢪه ☇ \n「N•R•D ┋ 𝓝𝓲𝓰𝓱𝓽 𝓡𝓮𝓭 🏰」`}, {quoted: msg})
-    }catch(e){
-      console.error("GEMINI ERROR:", e)
-      await sock.sendMessage(from, {text:'عذراً يا ريوكا، حدث خطأ في معالجة الطلب عبر Gemini.'}, {quoted: msg})
+    const msg=messages[0]
+    if(!msg.message||msg.key.fromMe) return
+    const from=msg.key.remoteJid
+    const sender=msg.key.participant||from
+    const senderNum=sender.replace(/[^0-9]/g,'')
+    if(DB.bans[senderNum]) return
+    if(DB.muted[senderNum]) return
+
+    const text=(msg.message.conversation||msg.message.extendedTextMessage?.text||'').trim()
+    const hasImage=!!msg.message.imageMessage, hasSticker=!!msg.message.stickerMessage, hasAudio=!!msg.message.audioMessage, hasVideo=!!msg.message.videoMessage
+    const mentioned=msg.message.extendedTextMessage?.contextInfo?.mentionedJid||[]
+    const botNum=(sock.user?.id||'').replace(/[^0-9]/g,'')
+    const isBotMentioned=mentioned.some(j=>j.replace(/[^0-9]/g,'').includes(botNum))||text.includes('سيل')
+    const userIsAdmin=await isAdmin(sock,from,sender)
+    const st=getSettings(from)
+
+    // --- حماية تلقائية ---
+    if(from.includes('@g.us')&&!userIsAdmin){
+      if(st.antiLink&&/https?:\/\/|www\./i.test(text)){
+        try{ await sock.sendMessage(from,{delete:msg.key}) }catch(e){}
+        await punish(sock,from,sender,senderNum,'نشر رابط ممنوع',msg); return
+      }
+      if(DB.words.some(w=>text.includes(w))){
+        try{ await sock.sendMessage(from,{delete:msg.key}) }catch(e){}
+        await punish(sock,from,sender,senderNum,'كلمة ممنوعة',msg); return
+      }
+      if(st.antiSpam){
+        const now=Date.now(), arr=(spamDB.get(senderNum)||[]).filter(t=>now-t<10000)
+        arr.push(now); spamDB.set(senderNum,arr)
+        if(arr.length>=7){ spamDB.set(senderNum,[]); await punish(sock,from,sender,senderNum,'سبام رسائل',msg); return }
+      }
+      if(hasSticker&&!st.allowedMedia.sticker){ try{await sock.sendMessage(from,{delete:msg.key})}catch(e){}; await punish(sock,from,sender,senderNum,'ملصقات ممنوعة',msg); return }
+      if(hasImage&&!st.allowedMedia.image){ try{await sock.sendMessage(from,{delete:msg.key})}catch(e){}; return }
+      if(hasAudio&&!st.allowedMedia.audio){ try{await sock.sendMessage(from,{delete:msg.key})}catch(e){}; return }
+      if(hasVideo&&!st.allowedMedia.video){ try{await sock.sendMessage(from,{delete:msg.key})}catch(e){}; return }
     }
+
+    // --- أوامر الإدارة ---
+    if(userIsAdmin){
+      if(text==='سيل الأوامر'){
+        await sock.sendMessage(from,{text:`📜 *أوامر سيل:*\n\n👑 إدارة:\n- تحذير @عضو سبب\n- فك تحذير @عضو\n- كتم @عضو / فك كتم @عضو\n- طرد @عضو / بان @عضو / فك بان @عضو\n- ترقية @عضو / تنزيل @عضو\n- قفل القروب / فتح القروب\n- منع روابط / سماح روابط\n- إضافة كلمة [كلمة] / حذف كلمة [كلمة]\n- تغيير الاسم [اسم] / تغيير الوصف [وصف]\n\n⭐ نقاط:\n- إضافة 10 @عضو / خصم 10 @عضو\n- المتصدرين / نقاطي / ملفي\n\n${SIGN}`},{quoted:msg}); return
+      }
+      if(text.startsWith('تحذير')){ const t=mentioned[0]; const tn=t?.replace(/[^0-9]/g,''); const rs=text.replace('تحذير','').replace(/@[0-9]+/g,'').trim()||'مخالفة'; if(t) await punish(sock,from,t,tn,rs,msg); return }
+      if(text.startsWith('فك تحذير')){ const tn=mentioned[0]?.replace(/[^0-9]/g,'')||text.replace(/[^0-9]/g,''); if(DB.warnings[tn]){DB.warnings[tn].pop(); saveDB()} await sock.sendMessage(from,{text:`✅ تم فك تحذير. المتبقي: ${(DB.warnings[tn]||[]).length}${SIGN}`},{quoted:msg}); return }
+      if(text.startsWith('بان')){ const tn=mentioned[0]?.replace(/[^0-9]/g,'')||text.replace(/[^0-9]/g,''); if(tn&&!isLord(mentioned[0]||'')){ DB.bans[tn]={reason:'بان إداري',time:new Date().toLocaleString('ar-SA')}; addLog(tn,'بان',senderNum); await sock.sendMessage(from,{text:`🔨 تم حظر ${tn}${SIGN}`},{quoted:msg}) } return }
+      if(text.startsWith('فك بان')){ const tn=text.replace(/[^0-9]/g,''); delete DB.bans[tn]; saveDB(); await sock.sendMessage(from,{text:`✅ تم فك البان عن ${tn}${SIGN}`},{quoted:msg}); return }
+      if(text.startsWith('ترقية')){ if(mentioned[0]) await sock.groupParticipantsUpdate(from,[mentioned[0]],"promote"); return }
+      if(text.startsWith('تنزيل')){ if(mentioned[0]) await sock.groupParticipantsUpdate(from,[mentioned[0]],"demote"); return }
+      if(text==='قفل القروب'){ await sock.groupSettingUpdate(from,'announcement'); await sock.sendMessage(from,{text:`🔒 تم قفل القروب${SIGN}`},{quoted:msg}); return }
+      if(text==='فتح القروب'){ await sock.groupSettingUpdate(from,'not_announcement'); await sock.sendMessage(from,{text:`🔓 تم فتح القروب${SIGN}`},{quoted:msg}); return }
+      if(text==='منع روابط'){ st.antiLink=true; saveDB(); await sock.sendMessage(from,{text:`✅ تم تفعيل منع الروابط${SIGN}`},{quoted:msg}); return }
+      if(text==='سماح روابط'){ st.antiLink=false; saveDB(); await sock.sendMessage(from,{text:`✅ تم السماح بالروابط${SIGN}`},{quoted:msg}); return }
+      if(text.startsWith('إضافة كلمة')){ const w=text.replace('إضافة كلمة','').trim(); if(w){DB.words.push(w); saveDB()} await sock.sendMessage(from,{text:`✅ تمت إضافة الكلمة: ${w}${SIGN}`},{quoted:msg}); return }
+      if(text.startsWith('تغيير الاسم')){ const n=text.replace('تغيير الاسم','').trim(); if(n) await sock.groupUpdateSubject(from,n); return }
+      if(text.startsWith('تغيير الوصف')){ const d=text.replace('تغيير الوصف','').trim(); if(d) await sock.groupUpdateDescription(from,d); return }
+      if(text.startsWith('طرد')){ let t=mentioned[0]||((text.replace(/[^0-9]/g,'').length>8)?text.replace(/[^0-9]/g,'')+'@s.whatsapp.net':null); if(t){ try{await sock.groupParticipantsUpdate(from,[t],"remove")}catch(e){} } return }
+      if(text.startsWith('كتم ')){ const tn=mentioned[0]?.replace(/[^0-9]/g,'')||text.replace(/[^0-9]/g,''); if(tn){DB.muted[tn]=true; saveDB(); await sock.sendMessage(from,{text:`🔇 تم كتم ${tn}${SIGN}`},{quoted:msg})} return }
+      if(text.startsWith('فك كتم')){ const tn=text.replace(/[^0-9]/g,''); delete DB.muted[tn]; saveDB(); await sock.sendMessage(from,{text:`🔊 تم فك الكتم عن ${tn}${SIGN}`},{quoted:msg}); return }
+      if(text.startsWith('إضافة ')){ const p=text.split(' ').filter(Boolean); let tn=mentioned[0]?.replace(/[^0-9]/g,'')||senderNum, amt=0; for(let x of p){ if(!isNaN(x)&&x!=='إضافة') amt=parseInt(x) } DB.points[tn]=(DB.points[tn]||0)+amt; addLog(tn,`+${amt} نقطة`,senderNum); await sock.sendMessage(from,{text:`✅ تم إضافة ${amt} لـ ${tn}. الحالي: ${DB.points[tn]}${SIGN}`},{quoted:msg}); return }
+      if(text.startsWith('خصم ')){ const p=text.split(' ').filter(Boolean); let tn=mentioned[0]?.replace(/[^0-9]/g,'')||senderNum, amt=0; for(let x of p){ if(!isNaN(x)&&x!=='خصم') amt=parseInt(x) } DB.points[tn]=(DB.points[tn]||0)-amt; addLog(tn,`-${amt} نقطة`,senderNum); await sock.sendMessage(from,{text:`⚠️ تم خصم ${amt} من ${tn}. الحالي: ${DB.points[tn]}${SIGN}`},{quoted:msg}); return }
+    }
+
+    if(text==='المتصدرين'){ let arr=Object.entries(DB.points).sort((a,b)=>b[1]-a[1]).slice(0,10); let r=`🏆 *المتصدرين:*\n`; arr.forEach(([n,p],i)=>{ r+=`${i+1}. ${DB.nick[n]||n}: ${p} نقطة\n` }); await sock.sendMessage(from,{text:r+SIGN},{quoted:msg}); return }
+    if(text==='نقاطي'){ await sock.sendMessage(from,{text:`✨ نقاطك: ${DB.points[senderNum]||0}${SIGN}`},{quoted:msg}); return }
+    if(text==='ملفي'){ const logs=(DB.logs[senderNum]||[]).map((l,i)=>`${i+1}. ${l.action} | ${l.time}`).join('\n')||'لا سجلات'; await sock.sendMessage(from,{text:`📜 ملفك:\n🏷️ ${DB.nick[senderNum]||'بدون لقب'}\n📈 ${DB.points[senderNum]||0} نقطة\n⚠️ تحذيرات: ${(DB.warnings[senderNum]||[]).length}\n\n${logs}${SIGN}`},{quoted:msg}); return }
+    if(text.startsWith('لقبي ')){ const nn=text.replace('لقبي','').trim(); if(nn){DB.nick[senderNum]=nn; saveDB(); await sock.sendMessage(from,{text:`✨ تم حفظ لقبك: ${nn}${SIGN}`},{quoted:msg})} return }
+
+    if(from.includes('@g.us')&&!isBotMentioned) return
+    let prompt=text||'[وسائط]'
+    if(hasImage) prompt='[أرسل صورة] '+text
+    if(hasSticker) prompt='[أرسل ملصق] '+text
+    if(hasAudio) prompt='[أرسل صوت] '+text
+    if(!prompt.trim()) return
+
+    addMem(sender,'user',prompt)
+    try{
+      const reply=await askGemini(getMem(sender),userIsAdmin)
+      addMem(sender,'assistant',reply)
+      // في الخاص بدون توقيع القروب المزعج، في القروب مع توقيع خفيف
+      const footer = from.includes('@g.us')? `\n\n> التزم بالقوانين لتتجنب خسارة نقاطك 🏰` : ``
+      await sock.sendMessage(from,{text:reply+footer},{quoted:msg})
+    }catch(e){ console.error("GEMINI ERROR:",e.message); await sock.sendMessage(from,{text:'عذراً، جوجل مزحوم حالياً (503). جرب بعد دقيقة.'},{quoted:msg}) }
     saveDB()
+    }catch(e){ console.error('Handler Error:',e) }
   })
 }
 startBot()
